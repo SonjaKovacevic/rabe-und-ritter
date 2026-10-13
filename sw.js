@@ -1,7 +1,7 @@
 'use strict';
 // Entschlüsselt die Spieldateien im Browser. Klartext liegt nur im Arbeitsspeicher,
 // nie in Cache Storage. Build-Version (wechselt bei jedem Bau):
-const VERSION = '20261013-190652-90e643';
+const VERSION = '20261013-192835-a78964';
 
 const DB = 'spiel-zugang', ABLAGE = 'schluessel', EINTRAG = 'aes';
 const BASIS = new URL(self.registration.scope).pathname;   // Pfad der Passwortseite
@@ -158,7 +158,7 @@ async function antworte(anfrage, url, zweiterVersuch) {
   try { manifest = await holeManifest(); }
   catch (e) {
     if (e instanceof KeinZugang) {
-      return anfrage.mode === 'navigate' ? Response.redirect(self.registration.scope, 302) : text(401, 'Kein Zugang');
+      return anfrage.mode === 'navigate' ? Response.redirect(self.registration.scope + '?zurueck', 302) : text(401, 'Kein Zugang');
     }
     return text(503, 'Das Spiel konnte nicht geladen werden. Bitte die Internetverbindung prüfen.');
   }

@@ -48,6 +48,19 @@
   button:disabled { opacity: .6; cursor: default; }
   .meldung { min-height: 1.4em; margin: 14px 0 0; font-size: 16px; font-weight: 600; color: var(--fehler); }
   .meldung.info { font-weight: 400; color: var(--leise); }
+  .dreht::before {
+    content: ""; display: inline-block; width: .9em; height: .9em; margin-right: .5em; vertical-align: -.12em;
+    border: 3px solid var(--rand); border-top-color: var(--akzent); border-radius: 50%;
+    animation: drehen .8s linear infinite;
+  }
+  @keyframes drehen { to { transform: rotate(360deg); } }
+  .hinweistext { margin: 0; font-size: 18px; font-weight: 600; }
+  .adresse {
+    margin: 16px 0 0; padding: 12px 14px; border: 2px dashed var(--rand); border-radius: 14px;
+    background: #fbfdff; font-size: 16px; overflow-wrap: anywhere;
+    -webkit-user-select: all; user-select: all;
+  }
+  .technik { margin: 14px 0 0; font-size: 12px; color: var(--leise); overflow-wrap: anywhere; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -55,7 +68,7 @@
 <main>
   <div class="zeichen" aria-hidden="true">&#128273;</div>
   <h1>Hallo!</h1>
-  <p id="status" class="meldung info" role="status">Einen Moment &hellip;</p>
+  <p id="status" class="meldung info dreht" role="status">Moment &hellip;</p>
   <form id="formular" hidden>
     <p class="hinweis">Bitte gib das Passwort ein.</p>
     <label for="passwort">Passwort</label>
@@ -64,26 +77,78 @@
     <button id="los" type="submit">Los geht's</button>
     <p id="meldung" class="meldung" role="alert"></p>
   </form>
+  <section id="kaputt" hidden>
+    <p class="hinweistext">Dieser Browser kann das Spiel leider nicht öffnen. Bitte den Link kopieren und in Safari oder Chrome einfügen.</p>
+    <p id="adresse" class="adresse"></p>
+    <button id="kopieren" type="button">Link kopieren</button>
+    <p id="kopiert" class="meldung info" role="status"></p>
+    <p id="technik" class="technik"></p>
+  </section>
   <noscript><p class="meldung">Bitte JavaScript einschalten.</p></noscript>
 </main>
 <script>
 (() => {
   'use strict';
   const DB = 'spiel-zugang', ABLAGE = 'schluessel', EINTRAG = 'aes';
+  // Fristen: Nichts darf ewig warten (eingebaute App-Browser antworten manchmal einfach nie).
+  const FRIST_NETZ = 20000, FRIST_DB = 8000, FRIST_SCHLUESSEL = 30000, FRIST_SW = 8000;
   const TEXT = {
     falsch: 'Das Passwort stimmt nicht.',
     netz: 'Keine Verbindung. Bitte später noch einmal versuchen.',
-    browser: 'Dieser Browser kann das Spiel leider nicht öffnen. Bitte Safari, Chrome, Edge oder Firefox verwenden (kein privates Fenster).',
-    fehler: 'Etwas ist schiefgegangen. Bitte die Seite neu laden.',
-    warten: 'Einen Moment …',
-    vergessen: 'Dieses Gerät hat das Passwort vergessen.'
+    warten: 'Moment …',
+    vergessen: 'Dieses Gerät hat das Passwort vergessen.',
+    kopiert: 'Link kopiert. Jetzt Safari oder Chrome öffnen und den Link in die Adresszeile einfügen.',
+    markiert: 'Der Link ist markiert. Bitte jetzt kopieren.'
   };
   const $ = id => document.getElementById(id);
   const formular = $('formular'), feld = $('passwort'), knopf = $('los'), meldung = $('meldung'), status = $('status');
+  const ADRESSE = new URL('./', location.href).href;
 
-  const nurStatus = (text, info) => { formular.hidden = true; status.hidden = false; status.textContent = text; status.classList.toggle('info', !!info); };
-  const setzeMeldung = (text, info) => { meldung.textContent = text || ''; meldung.classList.toggle('info', !!info); };
-  const zeigeFormular = (text, info) => { status.hidden = true; formular.hidden = false; setzeMeldung(text, info); feld.focus(); };
+  const nurStatus = (text, info) => { formular.hidden = true; $('kaputt').hidden = true; status.hidden = false; status.textContent = text; status.classList.toggle('info', !!info); status.classList.remove('dreht'); };
+  const setzeMeldung = (text, info, dreht) => { meldung.textContent = text || ''; meldung.classList.toggle('info', !!info); meldung.classList.toggle('dreht', !!dreht); };
+  const zeigeFormular = (text, info) => { status.hidden = true; $('kaputt').hidden = true; formular.hidden = false; setzeMeldung(text, info); feld.focus(); };
+
+  // --- Hinweis statt Einfrieren: Link zum Kopieren für Safari oder Chrome ---
+  const zeigeKaputt = detail => {
+    status.hidden = true; formular.hidden = true; $('kaputt').hidden = false;
+    const adresse = $('adresse');                          // Umbruch bevorzugt nach "/" (<wbr> wird nicht mitkopiert)
+    adresse.textContent = '';
+    (ADRESSE.match(/[^\/]*\/+|[^\/]+$/g) || [ADRESSE]).forEach((teil, i) => {
+      if (i) adresse.appendChild(document.createElement('wbr'));
+      adresse.appendChild(document.createTextNode(teil));
+    });
+    $('technik').textContent = detail ? 'Technischer Hinweis: ' + String(detail).slice(0, 200) : '';
+  };
+  const markiere = () => {
+    try { const r = document.createRange(), s = getSelection(); r.selectNodeContents($('adresse')); s.removeAllRanges(); s.addRange(r); } catch (e) {}
+  };
+  $('kopieren').addEventListener('click', async () => {
+    markiere();
+    let geklappt = false;
+    try { await mitFrist(navigator.clipboard.writeText(ADRESSE), 3000, 'Zwischenablage'); geklappt = true; }
+    catch (e) { try { geklappt = document.execCommand('copy'); } catch (e2) {} }
+    $('kopiert').textContent = geklappt ? TEXT.kopiert : TEXT.markiert;
+  });
+
+  class Netzfehler extends Error {}
+  class Browserfehler extends Error {}
+  const mitFrist = (versprechen, ms, was) => new Promise((ok, fehler) => {
+    const uhr = setTimeout(() => fehler(new Browserfehler(was + ': keine Antwort (Zeitlimit)')), ms);
+    Promise.resolve(versprechen).then(w => { clearTimeout(uhr); ok(w); }, e => { clearTimeout(uhr); fehler(e); });
+  });
+  // Ein Schritt, der hängen oder werfen kann: wird zu Browserfehler mit kurzer Beschreibung.
+  const schritt = async (was, ms, tun) => {
+    try { return await mitFrist(tun(), ms, was); }
+    catch (e) {
+      if (e instanceof Browserfehler || e instanceof Netzfehler) throw e;
+      throw new Browserfehler(was + ': ' + (e && e.name ? e.name + (e.message ? ' – ' + e.message : '') : String(e)));
+    }
+  };
+  const zeigeFehler = e => {
+    console.error(e);
+    if (e instanceof Netzfehler) nurStatus(TEXT.netz);
+    else zeigeKaputt(e instanceof Browserfehler ? e.message : String((e && e.message) || e));
+  };
 
   // --- Schlüsselablage (IndexedDB; der Schlüssel selbst ist nicht auslesbar) ---
   const oeffne = () => new Promise((ok, fehler) => {
@@ -92,7 +157,7 @@
     r.onsuccess = () => ok(r.result);
     r.onerror = () => fehler(r.error);
   });
-  const ablage = async (modus, tun) => {
+  const ablage = (modus, tun) => schritt('Speicher (IndexedDB)', FRIST_DB, async () => {
     const db = await oeffne();
     try {
       return await new Promise((ok, fehler) => {
@@ -101,64 +166,80 @@
         t.onerror = t.onabort = () => fehler(t.error);
       });
     } finally { db.close(); }
-  };
+  });
   const lies = () => ablage('readonly', s => s.get(EINTRAG));
   const speichere = wert => ablage('readwrite', s => s.put(wert, EINTRAG));
   const loesche = () => ablage('readwrite', s => s.delete(EINTRAG));
   const meldeSW = async () => {
     try {
-      const reg = await navigator.serviceWorker.getRegistration('./');
+      const reg = await mitFrist(navigator.serviceWorker.getRegistration('./'), 3000, 'Service Worker');
       if (reg && reg.active) reg.active.postMessage({ typ: 'zugang-geaendert' });
     } catch (e) {}
   };
 
-  // --- Krypto ---
-  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-  class Netzfehler extends Error {}
-  let pruefDaten = null;
-  const holePruefDaten = async () => {
-    if (!pruefDaten) {
-      let r;
-      try { r = await fetch('d/v.bin', { cache: 'no-cache' }); } catch (e) { throw new Netzfehler(); }
-      if (!r.ok) throw new Netzfehler();
-      pruefDaten = await r.arrayBuffer();
-    }
-    return pruefDaten;
-  };
-  const pruefe = async schluessel => {
-    const d = await holePruefDaten();
+  // --- Netz und Krypto ---
+  const lade = async (adresse, art) => {
     try {
-      const klar = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: new Uint8Array(d, 0, 12), additionalData: new TextEncoder().encode('v') },
-        schluessel, new Uint8Array(d, 12));
-      return new TextDecoder().decode(klar) === 'spiel-ok';
-    } catch (e) { return false; }
+      return await mitFrist(fetch(adresse, { cache: 'no-cache' }).then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r[art]();
+      }), FRIST_NETZ, adresse);
+    } catch (e) { throw new Netzfehler(); }
   };
-  const leite = async (passwort, k) => {
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  let pruefDaten = null;
+  const pruefe = async schluessel => {
+    if (!pruefDaten) pruefDaten = await lade('d/v.bin', 'arrayBuffer');
+    const d = pruefDaten;
+    const klar = await schritt('Entschlüsseln', FRIST_SCHLUESSEL, () => Promise.resolve().then(() => crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(d, 0, 12), additionalData: new TextEncoder().encode('v') },
+      schluessel, new Uint8Array(d, 12))).catch(() => null));        // falscher Schlüssel: kein Fehler, nur "falsch"
+    return !!klar && new TextDecoder().decode(klar) === 'spiel-ok';
+  };
+  // PBKDF2 läuft in WebCrypto asynchron (blockiert die Seite nicht).
+  const leite = (passwort, k) => schritt('Schlüssel ableiten (PBKDF2)', FRIST_SCHLUESSEL, async () => {
     const basis = await crypto.subtle.importKey('raw', new TextEncoder().encode(passwort.trim().normalize('NFC')),
       'PBKDF2', false, ['deriveKey']);
     return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: b64(k.salt), iterations: k.iter },
       basis, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  });
+
+  // --- Rücksprungzähler: kein endloses Hin und Her zwischen Passwortseite und Spiel ---
+  // 404.html und der Service Worker (ohne Schlüssel) schicken mit ?zurueck hierher zurück.
+  // Kommt das Spiel so mehrmals kurz hintereinander zurück, liefert der Service Worker es
+  // offenbar nicht aus: dann Hinweis statt erneutem Sprung.
+  const ZURUECK = 'spiel-zurueck', ZURUECK_FENSTER = 60000, ZURUECK_MAX = 2;
+  const liesZurueck = () => {
+    let w = null;
+    try { w = sessionStorage.getItem(ZURUECK); } catch (e) {}
+    if (!w && window.name.indexOf(ZURUECK + '=') === 0) w = window.name.slice(ZURUECK.length + 1);
+    try { const s = JSON.parse(w); if (s && Date.now() - s.t < ZURUECK_FENSTER) return s.n; } catch (e) {}
+    return 0;
+  };
+  const merkeZurueck = n => {
+    const w = n ? JSON.stringify({ n, t: Date.now() }) : '';
+    try { if (w) sessionStorage.setItem(ZURUECK, w); else sessionStorage.removeItem(ZURUECK); return; } catch (e) {}
+    window.name = w && ZURUECK + '=' + w;
   };
 
   // --- Service Worker starten und ins Spiel wechseln ---
   const insSpiel = async () => {
-    const reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
-    const bereit = await navigator.serviceWorker.ready;
-    const sw = bereit.active || reg.active;
-    if (sw) sw.postMessage({ typ: 'zugang-geaendert' });
-    if (!navigator.serviceWorker.controller) {
-      await new Promise(ok => {
-        navigator.serviceWorker.addEventListener('controllerchange', ok, { once: true });
-        setTimeout(ok, 4000);
+    if (liesZurueck() >= ZURUECK_MAX) {
+      merkeZurueck(0);                                    // nach Neuladen darf es noch einmal versuchen
+      throw new Browserfehler('Weiterleitung im Kreis: Das Spiel kam ' + ZURUECK_MAX + '-mal sofort zurück (Service Worker liefert es nicht aus).');
+    }
+    const sw = navigator.serviceWorker, ende = Date.now() + FRIST_SW, rest = () => Math.max(1000, ende - Date.now());
+    const reg = await schritt('Service Worker (Anmeldung)', rest(), () => sw.register('sw.js', { scope: './' }));
+    const bereit = await schritt('Service Worker (Aktivierung)', rest(), () => sw.ready);
+    const aktiv = bereit.active || reg.active;
+    if (!aktiv) throw new Browserfehler('Service Worker: nicht aktiv');
+    aktiv.postMessage({ typ: 'zugang-geaendert' });
+    if (!sw.controller) {                                 // kurz auf clients.claim() warten (nicht zwingend:
+      await new Promise(ok => {                           // Navigationen gehen an den aktiven Worker)
+        sw.addEventListener('controllerchange', ok, { once: true });
+        setTimeout(ok, 2000);
       });
     }
-    if (!navigator.serviceWorker.controller) {
-      let schonNeu = true;
-      try { schonNeu = sessionStorage.getItem('spiel-neu') === '1'; sessionStorage.setItem('spiel-neu', '1'); } catch (e) {}
-      if (!schonNeu) { location.reload(); return; }
-    }
-    try { sessionStorage.removeItem('spiel-neu'); } catch (e) {}
     location.replace('spiel/index.html');
   };
 
@@ -169,29 +250,22 @@
     const passwort = feld.value;
     if (!passwort.trim()) { setzeMeldung(TEXT.falsch); return; }
     knopf.disabled = true;
-    setzeMeldung(TEXT.warten, true);
+    setzeMeldung(TEXT.warten, true, true);
     try {
       const schluessel = await leite(passwort, k);
       if (!(await pruefe(schluessel))) { setzeMeldung(TEXT.falsch); feld.select(); return; }
       await speichere({ schluessel, salt: k.salt, zeit: Date.now() });
       await insSpiel();
     } catch (e) {
-      console.error(e);
-      setzeMeldung(e instanceof Netzfehler ? TEXT.netz : TEXT.fehler);
+      if (e instanceof Netzfehler) { console.error(e); setzeMeldung(TEXT.netz); }
+      else zeigeFehler(e);
     } finally {
       knopf.disabled = false;
     }
   });
 
   const start = async () => {
-    if (!window.isSecureContext || !('serviceWorker' in navigator) || !window.crypto || !crypto.subtle || !window.indexedDB) {
-      nurStatus(TEXT.browser); return;
-    }
-    try {
-      const r = await fetch('k.json', { cache: 'no-cache' });
-      if (!r.ok) throw new Netzfehler();
-      k = await r.json();
-    } catch (e) { nurStatus(TEXT.netz); return; }
+    try { k = await lade('k.json', 'json'); } catch (e) { nurStatus(TEXT.netz); return; }
 
     if (new URLSearchParams(location.search).has('abmelden')) {
       try { await loesche(); } catch (e) {}
@@ -201,18 +275,31 @@
       return;
     }
 
-    let gespeichert = null;
-    try { gespeichert = await lies(); } catch (e) {}
+    const gespeichert = await lies();
     if (gespeichert && gespeichert.schluessel) {
-      let gueltig;
-      try { gueltig = await pruefe(gespeichert.schluessel); } catch (e) { nurStatus(TEXT.netz); return; }
-      if (gueltig) { await insSpiel(); return; }
+      if (await pruefe(gespeichert.schluessel)) { await insSpiel(); return; }
       try { await loesche(); } catch (e) {}
       await meldeSW();
     }
     zeigeFormular();
   };
-  start().catch(e => { console.error(e); nurStatus(TEXT.fehler); });
+
+  const suche = new URLSearchParams(location.search);
+  if (suche.has('zurueck')) {
+    merkeZurueck(liesZurueck() + 1);
+    suche.delete('zurueck');
+    const rest = suche.toString();
+    try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '')); } catch (e) {}
+  } else merkeZurueck(0);
+
+  // Zuerst prüfen, ob der Browser alles kann, was das Spiel braucht (vor allem anderen).
+  const fehlt = [];
+  try { if (!window.isSecureContext) fehlt.push('sichere Verbindung'); } catch (e) { fehlt.push('sichere Verbindung'); }
+  try { if (!(window.crypto && crypto.subtle)) fehlt.push('WebCrypto'); } catch (e) { fehlt.push('WebCrypto'); }
+  try { if (!window.indexedDB) fehlt.push('IndexedDB'); } catch (e) { fehlt.push('IndexedDB'); }
+  try { if (!navigator.serviceWorker) fehlt.push('Service Worker'); } catch (e) { fehlt.push('Service Worker'); }
+  if (fehlt.length) zeigeKaputt('Es fehlt: ' + fehlt.join(', ') + '.');
+  else start().catch(zeigeFehler);
 })();
 </script>
 </body>
