@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light">
+<title>Spiel</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --himmel: #cfeaff; --wiese: #b9e3a0; --karte: #ffffff;
+    --text: #23324a; --leise: #5d6b80; --rand: #c9d6e6;
+    --akzent: #ff8a3d; --akzent-dunkel: #d9692a; --fehler: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    min-height: 100%; margin: 0; padding: 24px 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Avenir Next", "Nunito", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    background: linear-gradient(var(--himmel) 0 65%, var(--wiese) 65% 100%) fixed;
+    background-color: var(--himmel);
+  }
+  main {
+    width: min(380px, 100%); padding: 28px 24px 24px; text-align: center;
+    background: var(--karte); border-radius: 24px;
+    box-shadow: 0 6px 0 rgba(0,0,0,.08), 0 12px 28px rgba(0,0,0,.12);
+  }
+  .zeichen { font-size: 44px; line-height: 1; margin-bottom: 6px; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  .hinweis { margin: 0 0 20px; color: var(--leise); font-size: 17px; }
+  label { display: block; text-align: left; font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+  input {
+    width: 100%; font: inherit; font-size: 18px; color: var(--text);
+    padding: 12px 14px; border: 2px solid var(--rand); border-radius: 14px;
+    background: #fbfdff; outline: none;
+  }
+  input:focus { border-color: var(--akzent); }
+  button {
+    width: 100%; margin-top: 14px; padding: 14px; border: 0; border-radius: 16px;
+    font: inherit; font-size: 20px; font-weight: 700; color: #fff; cursor: pointer;
+    background: var(--akzent); box-shadow: 0 4px 0 var(--akzent-dunkel);
+  }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--akzent-dunkel); }
+  button:disabled { opacity: .6; cursor: default; }
+  .meldung { min-height: 1.4em; margin: 14px 0 0; font-size: 16px; font-weight: 600; color: var(--fehler); }
+  .meldung.info { font-weight: 400; color: var(--leise); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="zeichen" aria-hidden="true">&#128273;</div>
+  <h1>Hallo!</h1>
+  <p id="status" class="meldung info" role="status">Einen Moment &hellip;</p>
+  <form id="formular" hidden>
+    <p class="hinweis">Bitte gib das Passwort ein.</p>
+    <label for="passwort">Passwort</label>
+    <input id="passwort" name="password" type="password" autocomplete="current-password"
+           autocapitalize="off" autocorrect="off" spellcheck="false" required>
+    <button id="los" type="submit">Los geht's</button>
+    <p id="meldung" class="meldung" role="alert"></p>
+  </form>
+  <noscript><p class="meldung">Bitte JavaScript einschalten.</p></noscript>
+</main>
+<script>
+(() => {
+  'use strict';
+  const DB = 'spiel-zugang', ABLAGE = 'schluessel', EINTRAG = 'aes';
+  const TEXT = {
+    falsch: 'Das Passwort stimmt nicht.',
+    netz: 'Keine Verbindung. Bitte später noch einmal versuchen.',
+    browser: 'Dieser Browser kann das Spiel leider nicht öffnen. Bitte Safari, Chrome, Edge oder Firefox verwenden (kein privates Fenster).',
+    fehler: 'Etwas ist schiefgegangen. Bitte die Seite neu laden.',
+    warten: 'Einen Moment …',
+    vergessen: 'Dieses Gerät hat das Passwort vergessen.'
+  };
+  const $ = id => document.getElementById(id);
+  const formular = $('formular'), feld = $('passwort'), knopf = $('los'), meldung = $('meldung'), status = $('status');
+
+  const nurStatus = (text, info) => { formular.hidden = true; status.hidden = false; status.textContent = text; status.classList.toggle('info', !!info); };
+  const setzeMeldung = (text, info) => { meldung.textContent = text || ''; meldung.classList.toggle('info', !!info); };
+  const zeigeFormular = (text, info) => { status.hidden = true; formular.hidden = false; setzeMeldung(text, info); feld.focus(); };
+
+  // --- Schlüsselablage (IndexedDB; der Schlüssel selbst ist nicht auslesbar) ---
+  const oeffne = () => new Promise((ok, fehler) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(ABLAGE);
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => fehler(r.error);
+  });
+  const ablage = async (modus, tun) => {
+    const db = await oeffne();
+    try {
+      return await new Promise((ok, fehler) => {
+        const t = db.transaction(ABLAGE, modus), a = tun(t.objectStore(ABLAGE));
+        t.oncomplete = () => ok(a.result);
+        t.onerror = t.onabort = () => fehler(t.error);
+      });
+    } finally { db.close(); }
+  };
+  const lies = () => ablage('readonly', s => s.get(EINTRAG));
+  const speichere = wert => ablage('readwrite', s => s.put(wert, EINTRAG));
+  const loesche = () => ablage('readwrite', s => s.delete(EINTRAG));
+  const meldeSW = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('./');
+      if (reg && reg.active) reg.active.postMessage({ typ: 'zugang-geaendert' });
+    } catch (e) {}
+  };
+
+  // --- Krypto ---
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  class Netzfehler extends Error {}
+  let pruefDaten = null;
+  const holePruefDaten = async () => {
+    if (!pruefDaten) {
+      let r;
+      try { r = await fetch('d/v.bin', { cache: 'no-cache' }); } catch (e) { throw new Netzfehler(); }
+      if (!r.ok) throw new Netzfehler();
+      pruefDaten = await r.arrayBuffer();
+    }
+    return pruefDaten;
+  };
+  const pruefe = async schluessel => {
+    const d = await holePruefDaten();
+    try {
+      const klar = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(d, 0, 12), additionalData: new TextEncoder().encode('v') },
+        schluessel, new Uint8Array(d, 12));
+      return new TextDecoder().decode(klar) === 'spiel-ok';
+    } catch (e) { return false; }
+  };
+  const leite = async (passwort, k) => {
+    const basis = await crypto.subtle.importKey('raw', new TextEncoder().encode(passwort.trim().normalize('NFC')),
+      'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: b64(k.salt), iterations: k.iter },
+      basis, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  };
+
+  // --- Service Worker starten und ins Spiel wechseln ---
+  const insSpiel = async () => {
+    const reg = await navigator.serviceWorker.register('sw.js', { scope: './' });
+    const bereit = await navigator.serviceWorker.ready;
+    const sw = bereit.active || reg.active;
+    if (sw) sw.postMessage({ typ: 'zugang-geaendert' });
+    if (!navigator.serviceWorker.controller) {
+      await new Promise(ok => {
+        navigator.serviceWorker.addEventListener('controllerchange', ok, { once: true });
+        setTimeout(ok, 4000);
+      });
+    }
+    if (!navigator.serviceWorker.controller) {
+      let schonNeu = true;
+      try { schonNeu = sessionStorage.getItem('spiel-neu') === '1'; sessionStorage.setItem('spiel-neu', '1'); } catch (e) {}
+      if (!schonNeu) { location.reload(); return; }
+    }
+    try { sessionStorage.removeItem('spiel-neu'); } catch (e) {}
+    location.replace('spiel/index.html');
+  };
+
+  let k = null;
+  formular.addEventListener('submit', async ereignis => {
+    ereignis.preventDefault();
+    if (!k || knopf.disabled) return;
+    const passwort = feld.value;
+    if (!passwort.trim()) { setzeMeldung(TEXT.falsch); return; }
+    knopf.disabled = true;
+    setzeMeldung(TEXT.warten, true);
+    try {
+      const schluessel = await leite(passwort, k);
+      if (!(await pruefe(schluessel))) { setzeMeldung(TEXT.falsch); feld.select(); return; }
+      await speichere({ schluessel, salt: k.salt, zeit: Date.now() });
+      await insSpiel();
+    } catch (e) {
+      console.error(e);
+      setzeMeldung(e instanceof Netzfehler ? TEXT.netz : TEXT.fehler);
+    } finally {
+      knopf.disabled = false;
+    }
+  });
+
+  const start = async () => {
+    if (!window.isSecureContext || !('serviceWorker' in navigator) || !window.crypto || !crypto.subtle || !window.indexedDB) {
+      nurStatus(TEXT.browser); return;
+    }
+    try {
+      const r = await fetch('k.json', { cache: 'no-cache' });
+      if (!r.ok) throw new Netzfehler();
+      k = await r.json();
+    } catch (e) { nurStatus(TEXT.netz); return; }
+
+    if (new URLSearchParams(location.search).has('abmelden')) {
+      try { await loesche(); } catch (e) {}
+      await meldeSW();
+      history.replaceState(null, '', location.pathname);
+      zeigeFormular(TEXT.vergessen, true);
+      return;
+    }
+
+    let gespeichert = null;
+    try { gespeichert = await lies(); } catch (e) {}
+    if (gespeichert && gespeichert.schluessel) {
+      let gueltig;
+      try { gueltig = await pruefe(gespeichert.schluessel); } catch (e) { nurStatus(TEXT.netz); return; }
+      if (gueltig) { await insSpiel(); return; }
+      try { await loesche(); } catch (e) {}
+      await meldeSW();
+    }
+    zeigeFormular();
+  };
+  start().catch(e => { console.error(e); nurStatus(TEXT.fehler); });
+})();
+</script>
+</body>
+</html>

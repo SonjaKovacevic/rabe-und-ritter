@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Spiel</title>
+<link rel="icon" href="data:,">
+<script>
+(() => {
+  // Unbekannte Adresse (z. B. Lesezeichen ins Spiel ohne aktiven Service Worker): zur Passwortseite.
+  const p = location.pathname, i = p.indexOf('/spiel/'), m = p.match(/^\/[^\/]+\//);
+  const basis = i >= 0 ? p.slice(0, i + 1) : (m ? m[0] : '/');
+  if (p !== basis) location.replace(basis);
+})();
+</script>
+</head>
+<body style="font-family: system-ui, sans-serif; text-align: center; padding: 40px 16px;">
+<p>Diese Seite gibt es nicht.</p>
+</body>
+</html>
