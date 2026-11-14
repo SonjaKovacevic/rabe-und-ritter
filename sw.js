@@ -1,7 +1,7 @@
 'use strict';
 // Entschlüsselt die Spieldateien im Browser. Klartext liegt nur im Arbeitsspeicher,
 // nie in Cache Storage. Build-Version (wechselt bei jedem Bau):
-const VERSION = '20261113-220705-a5d18a';
+const VERSION = '20261114-021421-2ef432';
 
 const DB = 'spiel-zugang', ABLAGE = 'schluessel', EINTRAG = 'aes';
 const BASIS = new URL(self.registration.scope).pathname;   // Pfad der Passwortseite
